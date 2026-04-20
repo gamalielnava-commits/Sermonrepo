@@ -1,0 +1,60 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+ENV/
+.eggs/
+*.egg-info/
+.pytest_cache/
+
+# Node — will be installed fresh in build stage
+node_modules/
+remotion/node_modules/
+render-service/node_modules/
+dashboard/node_modules/
+dashboard/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Demo assets (heavy, not needed for runtime)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.gif
+screenshots/
+churchil_queen_vertical.gif
+churchil_queen_vertical_short.gif
+demo-openshorts.mp4
+videos/
+
+# Pre-downloaded models (Dockerfile re-downloads)
+*.pt
+
+# Local artifacts
+uploads/
+output/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Docs
+README.md
+README-UPSTREAM.md
+CLAUDE.md
+*.md
