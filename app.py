@@ -185,6 +185,12 @@ THUMBNAILS_DIR = os.path.join(OUTPUT_DIR, "thumbnails")
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 app.mount("/thumbnails", StaticFiles(directory=THUMBNAILS_DIR), name="thumbnails")
 
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
+
+
 class ProcessRequest(BaseModel):
     url: str
 
