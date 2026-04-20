@@ -476,7 +476,13 @@ def download_youtube_video(url, output_dir="."):
     else:
         cookies_path = None
         print("⚠️ YOUTUBE_COOKIES env var not found.")
-    
+
+    # Residential proxy (recommended for cloud deploys like Railway, Render, Fly).
+    # Datacenter IPs get 429/Unavailable from YouTube; a residential proxy looks
+    # like a real user and fixes the download transparently for end users.
+    proxy_url = os.environ.get("YTDLP_PROXY")
+    print(f"🌐 Proxy: {'enabled' if proxy_url else 'disabled'}")
+
     # Common yt-dlp options to work around YouTube bot detection.
     # extractor_args tries multiple player clients in order; tv_embed / android
     # avoid the OAuth/PO-token checks that block server IPs.
@@ -485,6 +491,7 @@ def download_youtube_video(url, output_dir="."):
         'verbose': True,
         'no_warnings': False,
         'cookiefile': cookies_path if cookies_path else None,
+        'proxy': proxy_url if proxy_url else None,
         'socket_timeout': 30,
         'retries': 10,
         'fragment_retries': 10,
