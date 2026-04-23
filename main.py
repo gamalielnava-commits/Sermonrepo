@@ -978,7 +978,17 @@ if __name__ == '__main__':
         
         if not clips_data or 'shorts' not in clips_data:
             print("❌ Failed to identify clips. Converting whole video as fallback.")
-            output_file = os.path.join(output_dir, f"{video_title}_vertical.mp4")
+            fallback_clip = {
+                'start': 0,
+                'end': duration,
+                'video_title_for_youtube_short': video_title,
+            }
+            clips_data = {'shorts': [fallback_clip], 'transcript': transcript}
+            metadata_file = os.path.join(output_dir, f"{video_title}_metadata.json")
+            with open(metadata_file, 'w') as f:
+                json.dump(clips_data, f, indent=2)
+            print(f"   Saved fallback metadata to {metadata_file}")
+            output_file = os.path.join(output_dir, f"{video_title}_clip_1.mp4")
             process_video_to_vertical(input_video, output_file)
         else:
             print(f"🔥 Found {len(clips_data['shorts'])} viral clips!")
@@ -1013,14 +1023,20 @@ if __name__ == '__main__':
                     '-c:a', 'aac',
                     clip_temp_path
                 ]
-                subprocess.run(cut_command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-                
+                cut_result = subprocess.run(cut_command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                if cut_result.returncode != 0 or not os.path.exists(clip_temp_path):
+                    err_msg = cut_result.stderr.decode('utf-8', errors='ignore')[:500]
+                    print(f"   ❌ ffmpeg cut failed for clip {i+1} (code {cut_result.returncode}): {err_msg}")
+                    continue
+
                 # Process vertical
                 success = process_video_to_vertical(clip_temp_path, clip_final_path)
-                
+
                 if success:
                     print(f"   ✅ Clip {i+1} ready: {clip_final_path}")
-                
+                else:
+                    print(f"   ❌ Vertical processing failed for clip {i+1}")
+
                 # Clean up temp cut
                 if os.path.exists(clip_temp_path):
                     os.remove(clip_temp_path)

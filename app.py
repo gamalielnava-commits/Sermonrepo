@@ -30,6 +30,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "5"))
 MAX_FILE_SIZE_MB = 2048  # 2GB limit
 JOB_RETENTION_SECONDS = 3600  # 1 hour retention
+JOB_TIMEOUT_SECONDS = int(os.environ.get("JOB_TIMEOUT_SECONDS", "3600"))  # 1 hour per job
 
 # Application State
 job_queue = asyncio.Queue()
@@ -77,7 +78,8 @@ def _relocate_root_job_artifacts(job_id: str, job_output_dir: str) -> bool:
                 shutil.move(clip_path, dest_clip)
 
         return True
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ Relocate error for job {job_id}: {e}")
         return False
 
 async def cleanup_jobs():
@@ -235,9 +237,19 @@ async def run_job(job_id, job_data):
         
         # Async wait for process with incremental updates
         start_wait = time.time()
+        timed_out = False
         while process.poll() is None:
             await asyncio.sleep(2)
-            
+
+            if time.time() - start_wait > JOB_TIMEOUT_SECONDS:
+                print(f"⏰ Job {job_id} exceeded timeout of {JOB_TIMEOUT_SECONDS}s, killing process.")
+                try:
+                    process.kill()
+                except Exception as kill_err:
+                    print(f"⚠️ Could not kill process for {job_id}: {kill_err}")
+                timed_out = True
+                break
+
             # Check for partial results every 2 seconds
             # Look for metadata file
             try:
@@ -273,14 +285,31 @@ async def run_job(job_id, job_data):
                 pass
 
         returncode = process.returncode
-        
+
+        if timed_out:
+            jobs[job_id]['status'] = 'failed'
+            jobs[job_id]['logs'].append(
+                f"Process killed after exceeding JOB_TIMEOUT_SECONDS ({JOB_TIMEOUT_SECONDS}s)."
+            )
+            return
+
         if returncode == 0:
             jobs[job_id]['status'] = 'completed'
             jobs[job_id]['logs'].append("Process finished successfully.")
-            
+
             # Start S3 upload in background (silent, non-blocking)
             loop = asyncio.get_event_loop()
-            loop.run_in_executor(None, upload_job_artifacts, output_dir, job_id)
+            s3_future = loop.run_in_executor(None, upload_job_artifacts, output_dir, job_id)
+
+            def _log_s3_result(fut, jid=job_id):
+                try:
+                    result = fut.result()
+                    if result is False:
+                        print(f"⚠️ S3 upload reported failure for job {jid}")
+                except Exception as s3_err:
+                    print(f"⚠️ S3 upload raised for job {jid}: {s3_err}")
+
+            s3_future.add_done_callback(_log_s3_result)
             
             # Find result JSON
             json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))

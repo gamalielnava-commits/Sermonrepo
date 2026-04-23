@@ -265,7 +265,7 @@ function App() {
 
   useEffect(() => {
     let interval;
-    if ((status === 'processing' || status === 'completed') && jobId) {
+    if (status === 'processing' && jobId) {
       interval = setInterval(async () => {
         try {
           const data = await pollJob(jobId);

@@ -71,30 +71,6 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                 throw new Error("Gemini API Key is missing. Please set it in Settings.");
             }
 
-            // Try Remotion effects endpoint first
-            const effectsRes = await fetch(getApiUrl('/api/effects/generate'), {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Gemini-Key': apiKey
-                },
-                body: JSON.stringify({
-                    job_id: jobId,
-                    clip_index: index,
-                    input_filename: currentVideoUrl.split('/').pop()
-                })
-            });
-
-            if (effectsRes.ok) {
-                const data = await effectsRes.json();
-                if (data.effects && data.effects.segments) {
-                    setCompositionParams(prev => ({ ...prev, effects: data.effects }));
-                    setShowPreviewModal(true);
-                    return;
-                }
-            }
-
-            // Fallback: legacy FFmpeg edit endpoint
             const res = await fetch(getApiUrl('/api/edit'), {
                 method: 'POST',
                 headers: {
