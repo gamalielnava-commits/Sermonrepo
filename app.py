@@ -1018,7 +1018,7 @@ async def translate_clip(
 class SocialPostRequest(BaseModel):
     job_id: str
     clip_index: int
-    api_key: str
+    api_key: Optional[str] = None
     user_id: str
     platforms: List[str] # ["tiktok", "instagram", "youtube"]
     # Optional overrides if frontend wants to edit them
@@ -1058,8 +1058,11 @@ async def post_to_socials(req: SocialPostRequest):
         
         # Prepare form data
         url = "https://api.upload-post.com/api/upload"
+        final_api_key = req.api_key or os.environ.get("UPLOAD_POST_API_KEY", "")
+        if not final_api_key:
+            raise HTTPException(status_code=400, detail="Missing Upload-Post API key")
         headers = {
-            "Authorization": f"Apikey {req.api_key}"
+            "Authorization": f"Apikey {final_api_key}"
         }
         
         # Prepare data as dict (httpx handles lists for multiple values)
@@ -1116,8 +1119,9 @@ async def post_to_socials(req: SocialPostRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/social/user")
-async def get_social_user(api_key: str = Header(..., alias="X-Upload-Post-Key")):
+async def get_social_user(x_upload_key: Optional[str] = Header(None, alias="X-Upload-Post-Key")):
     """Proxy to fetch user ID from Upload-Post"""
+    api_key = x_upload_key or os.environ.get("UPLOAD_POST_API_KEY", "")
     if not api_key:
          raise HTTPException(status_code=400, detail="Missing X-Upload-Post-Key header")
          
