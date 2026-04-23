@@ -443,10 +443,17 @@ def get_video_resolution(video_path):
 
 
 def sanitize_filename(filename):
-    """Remove invalid characters from filename."""
-    filename = re.sub(r'[<>:"/\\|?*]', '', filename)
+    """Remove invalid characters from filename. Handles Unicode/Spanish chars."""
+    import unicodedata
+    # Normalize unicode: convert accented chars to ASCII equivalents
+    filename = unicodedata.normalize('NFKD', filename)
+    filename = filename.encode('ascii', 'ignore').decode('ascii')
+    # Remove special chars, keep alphanumeric, spaces, hyphens, underscores
+    filename = re.sub(r'[<>:"/\\|?*!¡¿]', '', filename)
+    filename = re.sub(r'[^\w\s-]', '', filename)
     filename = filename.replace(' ', '_')
-    return filename[:100]
+    filename = re.sub(r'_+', '_', filename)  # collapse multiple underscores
+    return filename[:100].strip('_')
 
 
 def download_youtube_video(url, output_dir="."):
