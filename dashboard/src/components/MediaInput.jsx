@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
-import { Youtube, Upload, FileVideo, X } from 'lucide-react';
+import { Youtube, Upload, FileVideo, X, Clock } from 'lucide-react';
+
+const DURATION_OPTIONS = [5, 10, 30, 60];
 
 export default function MediaInput({ onProcess, isProcessing }) {
     const [mode, setMode] = useState('url'); // 'url' | 'file'
     const [url, setUrl] = useState('');
     const [file, setFile] = useState(null);
+    const [targetDuration, setTargetDuration] = useState(30);
 
     const handleSubmit = (e) => {
         e.preventDefault();
         if (mode === 'url' && url) {
-            onProcess({ type: 'url', payload: url });
+            onProcess({ type: 'url', payload: url, targetDuration });
         } else if (mode === 'file' && file) {
-            onProcess({ type: 'file', payload: file });
+            onProcess({ type: 'file', payload: file, targetDuration });
         }
     };
 
@@ -94,6 +97,30 @@ export default function MediaInput({ onProcess, isProcessing }) {
                         )}
                     </div>
                 )}
+
+                <div className="mt-6">
+                    <label className="flex items-center gap-2 text-sm text-zinc-400 mb-2">
+                        <Clock size={14} />
+                        Duración objetivo por short
+                    </label>
+                    <div className="flex gap-2 flex-wrap">
+                        {DURATION_OPTIONS.map((secs) => (
+                            <button
+                                key={secs}
+                                type="button"
+                                onClick={() => setTargetDuration(secs)}
+                                disabled={isProcessing}
+                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
+                                    targetDuration === secs
+                                        ? 'bg-primary/20 border-primary text-primary'
+                                        : 'bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10'
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                {secs}s
+                            </button>
+                        ))}
+                    </div>
+                </div>
 
                 <button
                     type="submit"

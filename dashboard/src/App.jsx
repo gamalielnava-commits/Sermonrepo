@@ -333,13 +333,15 @@ function App() {
     try {
       let body;
       const headers = { 'X-Gemini-Key': apiKey };
+      const targetDuration = data.targetDuration ?? 30;
 
       if (data.type === 'url') {
         headers['Content-Type'] = 'application/json';
-        body = JSON.stringify({ url: data.payload });
+        body = JSON.stringify({ url: data.payload, target_duration: targetDuration });
       } else {
         const formData = new FormData();
         formData.append('file', data.payload);
+        formData.append('target_duration', String(targetDuration));
         body = formData;
       }
 

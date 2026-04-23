@@ -29,13 +29,13 @@ load_dotenv()
 ASPECT_RATIO = 9 / 16
 
 GEMINI_PROMPT_TEMPLATE = """
-You are a senior short-form video editor. Read the ENTIRE transcript and word-level timestamps to choose the 3–15 MOST VIRAL moments for TikTok/IG Reels/YouTube Shorts. Each clip must be between 15 and 60 seconds long.
+You are a senior short-form video editor. Read the ENTIRE transcript and word-level timestamps to choose the 3–15 MOST VIRAL moments for TikTok/IG Reels/YouTube Shorts. Each clip must be approximately {target_duration} seconds long (between {min_duration} and {max_duration} seconds).
 
 ⚠️ FFMPEG TIME CONTRACT — STRICT REQUIREMENTS:
 - Return timestamps in ABSOLUTE SECONDS from the start of the video (usable in: ffmpeg -ss <start> -to <end> -i <input> ...).
 - Only NUMBERS with decimal point, up to 3 decimals (examples: 0, 1.250, 17.350).
 - Ensure 0 ≤ start < end ≤ VIDEO_DURATION_SECONDS.
-- Each clip between 15 and 60 s (inclusive).
+- Each clip between {min_duration} and {max_duration} s (inclusive). Target duration: ~{target_duration} s.
 - Prefer starting 0.2–0.4 s BEFORE the hook and ending 0.2–0.4 s AFTER the payoff.
 - Use silence moments for natural cuts; never cut in the middle of a word or phrase.
 - STRICTLY FORBIDDEN to use time formats other than absolute seconds.
@@ -50,7 +50,7 @@ WORDS_JSON (array of {{w, s, e}} where s/e are seconds):
 
 STRICT EXCLUSIONS:
 - No generic intros/outros or purely sponsorship segments unless they contain the hook.
-- No clips < 15 s or > 60 s.
+- No clips < {min_duration} s or > {max_duration} s.
 
 OUTPUT — RETURN ONLY VALID JSON (no markdown, no comments). Order clips by predicted performance (best to worst). In the descriptions, ALWAYS include a CTA like "Follow me and comment X and I'll send you the workflow" (especially if discussing an n8n workflow):
 {{
@@ -808,9 +808,9 @@ def transcribe_video(video_path):
         'language': info.language
     }
 
-def get_viral_clips(transcript_result, video_duration):
-    print("🤖  Analyzing with Gemini...")
-    
+def get_viral_clips(transcript_result, video_duration, target_duration=30):
+    print(f"🤖  Analyzing with Gemini (target clip duration: {target_duration}s)...")
+
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         print("❌ Error: GEMINI_API_KEY not found in environment variables.")
@@ -818,11 +818,15 @@ def get_viral_clips(transcript_result, video_duration):
 
 
     client = genai.Client(api_key=api_key)
-    
+
     # We use gemini-2.5-flash as requested.
-    model_name = 'gemini-2.5-flash' 
-    
+    model_name = 'gemini-2.5-flash'
+
     print(f"🤖  Initializing Gemini with model: {model_name}")
+
+    # Derive allowed duration range from target (±40%, min 3s)
+    min_duration = max(3, int(target_duration * 0.6))
+    max_duration = max(min_duration + 2, int(target_duration * 1.4))
 
     # Extract words
     words = []
@@ -836,6 +840,9 @@ def get_viral_clips(transcript_result, video_duration):
 
     prompt = GEMINI_PROMPT_TEMPLATE.format(
         video_duration=video_duration,
+        target_duration=target_duration,
+        min_duration=min_duration,
+        max_duration=max_duration,
         transcript_text=json.dumps(transcript_result['text']),
         words_json=json.dumps(words)
     )
@@ -884,20 +891,41 @@ def get_viral_clips(transcript_result, video_duration):
         # ------------------------
 
         # Clean response if it contains markdown code blocks
-        text = response.text
+        text = response.text or ""
         if text.startswith("```json"):
             text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
         if text.endswith("```"):
             text = text[:-3]
         text = text.strip()
-        
-        result_json = json.loads(text)
+
+        if not text:
+            print("❌ Gemini returned empty response.")
+            return None
+
+        try:
+            result_json = json.loads(text)
+        except json.JSONDecodeError as je:
+            # Try to salvage JSON object if wrapped in extra text
+            start_idx = text.find('{')
+            end_idx = text.rfind('}')
+            if start_idx != -1 and end_idx > start_idx:
+                try:
+                    result_json = json.loads(text[start_idx:end_idx + 1])
+                except json.JSONDecodeError:
+                    print(f"❌ Gemini JSON parse failed: {je}. Raw (first 500 chars): {text[:500]}")
+                    return None
+            else:
+                print(f"❌ Gemini JSON parse failed: {je}. Raw (first 500 chars): {text[:500]}")
+                return None
+
         if cost_analysis:
             result_json['cost_analysis'] = cost_analysis
-            
+
         return result_json
     except Exception as e:
-        print(f"❌ Gemini Error: {e}")
+        print(f"❌ Gemini Error: {type(e).__name__}: {e}")
         return None
 
 if __name__ == '__main__':
@@ -910,6 +938,8 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--output', type=str, help="Output directory or file (if processing whole video).")
     parser.add_argument('--keep-original', action='store_true', help="Keep the downloaded YouTube video.")
     parser.add_argument('--skip-analysis', action='store_true', help="Skip AI analysis and convert the whole video.")
+    parser.add_argument('--target-duration', type=int, default=30, choices=[5, 10, 30, 60],
+                        help="Target duration in seconds for each short clip (5, 10, 30 or 60).")
     
     args = parser.parse_args()
 
@@ -974,23 +1004,38 @@ if __name__ == '__main__':
         cap.release()
 
         # 4. Gemini Analysis
-        clips_data = get_viral_clips(transcript, duration)
-        
-        if not clips_data or 'shorts' not in clips_data:
-            print("❌ Failed to identify clips. Converting whole video as fallback.")
-            fallback_clip = {
-                'start': 0,
-                'end': duration,
-                'video_title_for_youtube_short': video_title,
-            }
-            clips_data = {'shorts': [fallback_clip], 'transcript': transcript}
+        target_duration = args.target_duration
+        clips_data = get_viral_clips(transcript, duration, target_duration=target_duration)
+
+        if not clips_data or 'shorts' not in clips_data or not clips_data.get('shorts'):
+            print(f"⚠️ Gemini didn't return clips. Falling back to fixed {target_duration}s segments.")
+            # Segment the video into chunks of target_duration seconds
+            fallback_shorts = []
+            n_chunks = max(1, int(duration // target_duration))
+            # Ignore the final sliver if it's shorter than half target_duration
+            remainder = duration - (n_chunks * target_duration)
+            if remainder >= target_duration * 0.5:
+                n_chunks += 1
+            for i in range(n_chunks):
+                start_s = i * target_duration
+                end_s = min(start_s + target_duration, duration)
+                if end_s - start_s < 2:  # Skip impossibly short tail
+                    continue
+                fallback_shorts.append({
+                    'start': round(start_s, 3),
+                    'end': round(end_s, 3),
+                    'video_title_for_youtube_short': f"{video_title}_part_{i+1}",
+                    'video_description_for_tiktok': '',
+                    'video_description_for_instagram': '',
+                    'viral_hook_text': '',
+                })
+            clips_data = {'shorts': fallback_shorts, 'transcript': transcript}
             metadata_file = os.path.join(output_dir, f"{video_title}_metadata.json")
             with open(metadata_file, 'w') as f:
                 json.dump(clips_data, f, indent=2)
-            print(f"   Saved fallback metadata to {metadata_file}")
-            output_file = os.path.join(output_dir, f"{video_title}_clip_1.mp4")
-            process_video_to_vertical(input_video, output_file)
-        else:
+            print(f"   Saved fallback metadata with {len(fallback_shorts)} segments to {metadata_file}")
+
+        if clips_data.get('shorts'):
             print(f"🔥 Found {len(clips_data['shorts'])} viral clips!")
             
             # Save metadata

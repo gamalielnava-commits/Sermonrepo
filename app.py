@@ -347,30 +347,41 @@ async def run_job(job_id, job_data):
 async def process_endpoint(
     request: Request,
     file: Optional[UploadFile] = File(None),
-    url: Optional[str] = Form(None)
+    url: Optional[str] = Form(None),
+    target_duration: Optional[int] = Form(None)
 ):
     api_key = request.headers.get("X-Gemini-Key") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=400, detail="Missing X-Gemini-Key header")
-    
+
     # Handle JSON body manually for URL payload
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
         body = await request.json()
         url = body.get("url")
-    
+        body_td = body.get("target_duration")
+        if body_td is not None:
+            try:
+                target_duration = int(body_td)
+            except (TypeError, ValueError):
+                pass
+
     if not url and not file:
         raise HTTPException(status_code=400, detail="Must provide URL or File")
+
+    # Clamp to allowed values
+    if target_duration not in (5, 10, 30, 60):
+        target_duration = 30
 
     job_id = str(uuid.uuid4())
     job_output_dir = os.path.join(OUTPUT_DIR, job_id)
     os.makedirs(job_output_dir, exist_ok=True)
-    
+
     # Prepare Command
     cmd = ["python", "-u", "main.py"] # -u for unbuffered
     env = os.environ.copy()
     env["GEMINI_API_KEY"] = api_key # Override with key from request
-    
+
     if url:
         cmd.extend(["-u", url])
     else:
@@ -393,6 +404,7 @@ async def process_endpoint(
         cmd.extend(["-i", input_path])
 
     cmd.extend(["-o", job_output_dir])
+    cmd.extend(["--target-duration", str(target_duration)])
 
     # Enqueue Job
     jobs[job_id] = {
