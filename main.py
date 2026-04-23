@@ -101,7 +101,7 @@ class SmoothedCameraman:
              
         # Safe Zone: 20% of the video width
         # As long as the target is within this zone relative to current center, DO NOT MOVE.
-        self.safe_zone_radius = self.crop_width * 0.25
+        self.safe_zone_radius = self.crop_width * 0.10
 
     def update_target(self, face_box):
         """
@@ -132,7 +132,7 @@ class SmoothedCameraman:
                 if abs(diff) > self.crop_width * 0.5:
                     speed = 15.0 # Fast re-frame
                 else:
-                    speed = 3.0  # Slow, steady pan
+                    speed = 6.0  # Responsive centering pan
                 
                 self.current_center_x += direction * speed
                 
@@ -692,7 +692,7 @@ def process_video_to_vertical(input_video, final_output_video):
                 # "Single Speaker" -> Track & Crop
                 
                 # Detect every 2nd frame for performance
-                if frame_number % 2 == 0:
+                if frame_number % 2 == 0 or frame_number < 30:
                     candidates = detect_face_candidates(frame)
                     target_box = speaker_tracker.get_target(candidates, frame_number, original_width)
                     if target_box:
