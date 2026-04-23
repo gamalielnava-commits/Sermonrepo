@@ -393,8 +393,24 @@ export default function ResultCard({ clip, index, jobId, uploadPostKey, uploadUs
                     <h3 className="text-base font-bold text-white leading-tight line-clamp-2 mb-2 break-words" title={clip.video_title_for_youtube_short}>
                         {clip.video_title_for_youtube_short || "Viral Clip Generated"}
                     </h3>
-                    <div className="flex flex-wrap gap-2 text-[10px] text-zinc-500 font-mono">
+                    <div className="flex flex-wrap gap-2 text-[10px] text-zinc-500 font-mono items-center">
                         <span className="bg-white/5 px-1.5 py-0.5 rounded border border-white/5 shrink-0">{Math.floor(clip.end - clip.start)}s</span>
+                        {typeof clip.viral_score === 'number' && (
+                            <span
+                                title="Predicción de viralidad (0-100)"
+                                className={`px-1.5 py-0.5 rounded border shrink-0 font-bold ${
+                                    clip.viral_score >= 80
+                                        ? 'bg-green-500/15 border-green-500/40 text-green-300'
+                                        : clip.viral_score >= 60
+                                        ? 'bg-yellow-500/15 border-yellow-500/40 text-yellow-300'
+                                        : clip.viral_score >= 40
+                                        ? 'bg-orange-500/15 border-orange-500/40 text-orange-300'
+                                        : 'bg-red-500/15 border-red-500/40 text-red-300'
+                                }`}
+                            >
+                                🔥 {clip.viral_score}%
+                            </span>
+                        )}
                         <span className="bg-white/5 px-1.5 py-0.5 rounded border border-white/5 shrink-0">#shorts</span>
                         <span className="bg-white/5 px-1.5 py-0.5 rounded border border-white/5 shrink-0">#viral</span>
                     </div>

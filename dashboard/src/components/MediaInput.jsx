@@ -1,20 +1,36 @@
 import React, { useState } from 'react';
-import { Youtube, Upload, FileVideo, X, Clock } from 'lucide-react';
+import { Youtube, Upload, FileVideo, X, Clock, Hash, Video } from 'lucide-react';
 
 const DURATION_OPTIONS = [5, 10, 30, 60];
+const CLIP_COUNT_OPTIONS = [
+    { value: 0, label: 'Auto' },
+    { value: 3, label: '3' },
+    { value: 5, label: '5' },
+    { value: 10, label: '10' },
+    { value: 15, label: '15' },
+];
+const QUALITY_OPTIONS = [
+    { value: 'best', label: 'Máxima' },
+    { value: '1080p', label: '1080p' },
+    { value: '720p', label: '720p' },
+    { value: '480p', label: '480p' },
+];
 
 export default function MediaInput({ onProcess, isProcessing }) {
     const [mode, setMode] = useState('url'); // 'url' | 'file'
     const [url, setUrl] = useState('');
     const [file, setFile] = useState(null);
     const [targetDuration, setTargetDuration] = useState(30);
+    const [clipCount, setClipCount] = useState(0);
+    const [quality, setQuality] = useState('best');
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        const extras = { targetDuration, clipCount, quality };
         if (mode === 'url' && url) {
-            onProcess({ type: 'url', payload: url, targetDuration });
+            onProcess({ type: 'url', payload: url, ...extras });
         } else if (mode === 'file' && file) {
-            onProcess({ type: 'file', payload: file, targetDuration });
+            onProcess({ type: 'file', payload: file, ...extras });
         }
     };
 
@@ -117,6 +133,54 @@ export default function MediaInput({ onProcess, isProcessing }) {
                                 } disabled:opacity-50 disabled:cursor-not-allowed`}
                             >
                                 {secs}s
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="mt-4">
+                    <label className="flex items-center gap-2 text-sm text-zinc-400 mb-2">
+                        <Hash size={14} />
+                        Cantidad de clips
+                    </label>
+                    <div className="flex gap-2 flex-wrap">
+                        {CLIP_COUNT_OPTIONS.map(({ value, label }) => (
+                            <button
+                                key={value}
+                                type="button"
+                                onClick={() => setClipCount(value)}
+                                disabled={isProcessing}
+                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
+                                    clipCount === value
+                                        ? 'bg-primary/20 border-primary text-primary'
+                                        : 'bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10'
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="mt-4">
+                    <label className="flex items-center gap-2 text-sm text-zinc-400 mb-2">
+                        <Video size={14} />
+                        Calidad de video
+                    </label>
+                    <div className="flex gap-2 flex-wrap">
+                        {QUALITY_OPTIONS.map(({ value, label }) => (
+                            <button
+                                key={value}
+                                type="button"
+                                onClick={() => setQuality(value)}
+                                disabled={isProcessing}
+                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
+                                    quality === value
+                                        ? 'bg-primary/20 border-primary text-primary'
+                                        : 'bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10'
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                {label}
                             </button>
                         ))}
                     </div>
