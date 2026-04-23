@@ -348,7 +348,9 @@ async def process_endpoint(
     request: Request,
     file: Optional[UploadFile] = File(None),
     url: Optional[str] = Form(None),
-    target_duration: Optional[int] = Form(None)
+    target_duration: Optional[int] = Form(None),
+    clip_count: Optional[int] = Form(None),
+    quality: Optional[str] = Form(None)
 ):
     api_key = request.headers.get("X-Gemini-Key") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -365,6 +367,15 @@ async def process_endpoint(
                 target_duration = int(body_td)
             except (TypeError, ValueError):
                 pass
+        body_cc = body.get("clip_count")
+        if body_cc is not None:
+            try:
+                clip_count = int(body_cc)
+            except (TypeError, ValueError):
+                pass
+        body_q = body.get("quality")
+        if body_q is not None:
+            quality = str(body_q)
 
     if not url and not file:
         raise HTTPException(status_code=400, detail="Must provide URL or File")
@@ -372,6 +383,10 @@ async def process_endpoint(
     # Clamp to allowed values
     if target_duration not in (5, 10, 30, 60):
         target_duration = 30
+    if clip_count not in (0, 3, 5, 10, 15):
+        clip_count = 0  # 0 = auto
+    if quality not in ("best", "1080p", "720p", "480p"):
+        quality = "best"
 
     job_id = str(uuid.uuid4())
     job_output_dir = os.path.join(OUTPUT_DIR, job_id)
@@ -405,6 +420,8 @@ async def process_endpoint(
 
     cmd.extend(["-o", job_output_dir])
     cmd.extend(["--target-duration", str(target_duration)])
+    cmd.extend(["--clip-count", str(clip_count)])
+    cmd.extend(["--quality", quality])
 
     # Enqueue Job
     jobs[job_id] = {

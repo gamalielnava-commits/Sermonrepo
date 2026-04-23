@@ -334,14 +334,23 @@ function App() {
       let body;
       const headers = { 'X-Gemini-Key': apiKey };
       const targetDuration = data.targetDuration ?? 30;
+      const clipCount = data.clipCount ?? 0;
+      const quality = data.quality ?? 'best';
 
       if (data.type === 'url') {
         headers['Content-Type'] = 'application/json';
-        body = JSON.stringify({ url: data.payload, target_duration: targetDuration });
+        body = JSON.stringify({
+          url: data.payload,
+          target_duration: targetDuration,
+          clip_count: clipCount,
+          quality,
+        });
       } else {
         const formData = new FormData();
         formData.append('file', data.payload);
         formData.append('target_duration', String(targetDuration));
+        formData.append('clip_count', String(clipCount));
+        formData.append('quality', quality);
         body = formData;
       }
 
@@ -813,11 +822,14 @@ function App() {
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-1">
                   {results && results.clips && results.clips.length > 0 ? (
                     <div className={`grid gap-4 pb-10 ${status === 'complete' ? 'grid-cols-1 xl:grid-cols-2' : 'grid-cols-1'}`}>
-                      {results.clips.map((clip, i) => (
+                      {[...results.clips]
+                        .map((clip, originalIdx) => ({ clip, originalIdx }))
+                        .sort((a, b) => (b.clip.viral_score ?? -1) - (a.clip.viral_score ?? -1))
+                        .map(({ clip, originalIdx }) => (
                         <ResultCard
-                          key={i}
+                          key={originalIdx}
                           clip={clip}
-                          index={i}
+                          index={originalIdx}
                           jobId={jobId}
                           uploadPostKey={uploadPostKey}
                           uploadUserId={uploadUserId}

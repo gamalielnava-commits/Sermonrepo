@@ -29,7 +29,7 @@ load_dotenv()
 ASPECT_RATIO = 9 / 16
 
 GEMINI_PROMPT_TEMPLATE = """
-You are a senior short-form video editor. Read the ENTIRE transcript and word-level timestamps to choose the 3–15 MOST VIRAL moments for TikTok/IG Reels/YouTube Shorts. Each clip must be approximately {target_duration} seconds long (between {min_duration} and {max_duration} seconds).
+You are a senior short-form video editor. Read the ENTIRE transcript and word-level timestamps to choose the {clip_count_instruction} MOST VIRAL moments for TikTok/IG Reels/YouTube Shorts. Each clip must be approximately {target_duration} seconds long (between {min_duration} and {max_duration} seconds).
 
 ⚠️ FFMPEG TIME CONTRACT — STRICT REQUIREMENTS:
 - Return timestamps in ABSOLUTE SECONDS from the start of the video (usable in: ffmpeg -ss <start> -to <end> -i <input> ...).
@@ -52,12 +52,13 @@ STRICT EXCLUSIONS:
 - No generic intros/outros or purely sponsorship segments unless they contain the hook.
 - No clips < {min_duration} s or > {max_duration} s.
 
-OUTPUT — RETURN ONLY VALID JSON (no markdown, no comments). Order clips by predicted performance (best to worst). In the descriptions, ALWAYS include a CTA like "Follow me and comment X and I'll send you the workflow" (especially if discussing an n8n workflow):
+OUTPUT — RETURN ONLY VALID JSON (no markdown, no comments). Order clips by predicted performance (best to worst). Assign each clip a `viral_score` integer from 0 to 100 (100 = most viral). In the descriptions, ALWAYS include a CTA like "Follow me and comment X and I'll send you the workflow":
 {{
   "shorts": [
     {{
       "start": <number in seconds, e.g., 12.340>,
       "end": <number in seconds, e.g., 37.900>,
+      "viral_score": <integer 0-100>,
       "video_description_for_tiktok": "<description for TikTok oriented to get views>",
       "video_description_for_instagram": "<description for Instagram oriented to get views>",
       "video_title_for_youtube_short": "<title for YouTube Short oriented to get views 100 chars max>",
@@ -456,13 +457,38 @@ def sanitize_filename(filename):
     return filename[:100].strip('_')
 
 
-def download_youtube_video(url, output_dir="."):
+def _quality_to_ydl_format(quality):
+    """Map UI quality choice to a yt-dlp format selector."""
+    q = (quality or "best").lower()
+    if q in ("best", "max"):
+        return ('bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/'
+                'bestvideo[vcodec^=avc1]+bestaudio/best[ext=mp4]/best')
+    if q == "1080p":
+        return ('bestvideo[height<=1080][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/'
+                'bestvideo[height<=1080][ext=mp4]+bestaudio/best[height<=1080][ext=mp4]/best')
+    if q == "720p":
+        return ('bestvideo[height<=720][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/'
+                'bestvideo[height<=720][ext=mp4]+bestaudio/best[height<=720][ext=mp4]/best')
+    if q == "480p":
+        return ('bestvideo[height<=480][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/'
+                'bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480][ext=mp4]/best')
+    return ('bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/'
+            'bestvideo+bestaudio/best')
+
+
+def _quality_to_crf(quality):
+    """Map UI quality choice to an ffmpeg CRF value (lower = higher quality)."""
+    q = (quality or "best").lower()
+    return {"best": 16, "1080p": 18, "720p": 20, "480p": 23}.get(q, 18)
+
+
+def download_youtube_video(url, output_dir=".", quality="best"):
     """
     Downloads a YouTube video using yt-dlp.
     Returns the path to the downloaded video and the video title.
     """
     print(f"🔍 Debug: yt-dlp version: {yt_dlp.version.__version__}")
-    print("📥 Downloading video from YouTube...")
+    print(f"📥 Downloading video from YouTube (quality={quality})...")
     step_start_time = time.time()
 
     cookies_path = '/app/cookies.txt'
@@ -570,7 +596,7 @@ Technical Details: {str(e)}
     
     ydl_opts = {
         **_COMMON_YDL_OPTS,
-        'format': 'bestvideo[height>=1080][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc1]+bestaudio/best[ext=mp4]/best',
+        'format': _quality_to_ydl_format(quality),
         'outtmpl': output_template,
         'merge_output_format': 'mp4',
         'overwrites': True,
@@ -808,8 +834,8 @@ def transcribe_video(video_path):
         'language': info.language
     }
 
-def get_viral_clips(transcript_result, video_duration, target_duration=30):
-    print(f"🤖  Analyzing with Gemini (target clip duration: {target_duration}s)...")
+def get_viral_clips(transcript_result, video_duration, target_duration=30, clip_count=0):
+    print(f"🤖  Analyzing with Gemini (target clip duration: {target_duration}s, clip_count: {clip_count or 'auto'})...")
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -828,6 +854,12 @@ def get_viral_clips(transcript_result, video_duration, target_duration=30):
     min_duration = max(3, int(target_duration * 0.6))
     max_duration = max(min_duration + 2, int(target_duration * 1.4))
 
+    # Build the clip count instruction for the prompt
+    if clip_count and clip_count > 0:
+        clip_count_instruction = f"EXACTLY {clip_count}"
+    else:
+        clip_count_instruction = "3 to 15"
+
     # Extract words
     words = []
     for segment in transcript_result['segments']:
@@ -843,6 +875,7 @@ def get_viral_clips(transcript_result, video_duration, target_duration=30):
         target_duration=target_duration,
         min_duration=min_duration,
         max_duration=max_duration,
+        clip_count_instruction=clip_count_instruction,
         transcript_text=json.dumps(transcript_result['text']),
         words_json=json.dumps(words)
     )
@@ -940,6 +973,11 @@ if __name__ == '__main__':
     parser.add_argument('--skip-analysis', action='store_true', help="Skip AI analysis and convert the whole video.")
     parser.add_argument('--target-duration', type=int, default=30, choices=[5, 10, 30, 60],
                         help="Target duration in seconds for each short clip (5, 10, 30 or 60).")
+    parser.add_argument('--clip-count', type=int, default=0,
+                        help="Exact number of clips to generate (0 = auto / Gemini decides 3-15).")
+    parser.add_argument('--quality', type=str, default='best',
+                        choices=['best', '1080p', '720p', '480p'],
+                        help="Download and encoding quality preset.")
     
     args = parser.parse_args()
 
@@ -966,7 +1004,7 @@ if __name__ == '__main__':
             else:
                 output_dir = "."
         
-        input_video, video_title = download_youtube_video(args.url, output_dir)
+        input_video, video_title = download_youtube_video(args.url, output_dir, quality=args.quality)
     else:
         input_video = args.input
         video_title = os.path.splitext(os.path.basename(input_video))[0]
@@ -1005,7 +1043,15 @@ if __name__ == '__main__':
 
         # 4. Gemini Analysis
         target_duration = args.target_duration
-        clips_data = get_viral_clips(transcript, duration, target_duration=target_duration)
+        clips_data = get_viral_clips(transcript, duration, target_duration=target_duration, clip_count=args.clip_count)
+
+        # If Gemini returned too many clips, sort by viral_score desc and keep the top N
+        if clips_data and clips_data.get('shorts') and args.clip_count and args.clip_count > 0:
+            shorts = clips_data['shorts']
+            if len(shorts) > args.clip_count:
+                shorts.sort(key=lambda c: c.get('viral_score') or 0, reverse=True)
+                clips_data['shorts'] = shorts[:args.clip_count]
+                print(f"   Trimmed Gemini output from {len(shorts)} to top {args.clip_count} by viral_score")
 
         if not clips_data or 'shorts' not in clips_data or not clips_data.get('shorts'):
             print(f"⚠️ Gemini didn't return clips. Falling back to fixed {target_duration}s segments.")
@@ -1016,6 +1062,9 @@ if __name__ == '__main__':
             remainder = duration - (n_chunks * target_duration)
             if remainder >= target_duration * 0.5:
                 n_chunks += 1
+            # Cap by clip_count if requested
+            if args.clip_count and args.clip_count > 0:
+                n_chunks = min(n_chunks, args.clip_count)
             for i in range(n_chunks):
                 start_s = i * target_duration
                 end_s = min(start_s + target_duration, duration)
@@ -1024,6 +1073,7 @@ if __name__ == '__main__':
                 fallback_shorts.append({
                     'start': round(start_s, 3),
                     'end': round(end_s, 3),
+                    'viral_score': None,
                     'video_title_for_youtube_short': f"{video_title}_part_{i+1}",
                     'video_description_for_tiktok': '',
                     'video_description_for_instagram': '',
@@ -1059,12 +1109,13 @@ if __name__ == '__main__':
                 
                 # ffmpeg cut
                 # Using re-encoding for precision as requested by strict seconds
+                cut_crf = _quality_to_crf(args.quality)
                 cut_command = [
-                    'ffmpeg', '-y', 
-                    '-ss', str(start), 
-                    '-to', str(end), 
+                    'ffmpeg', '-y',
+                    '-ss', str(start),
+                    '-to', str(end),
                     '-i', input_video,
-                    '-c:v', 'libx264', '-crf', '18', '-preset', 'fast',
+                    '-c:v', 'libx264', '-crf', str(cut_crf), '-preset', 'fast',
                     '-c:a', 'aac',
                     clip_temp_path
                 ]
