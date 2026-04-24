@@ -19,6 +19,13 @@ from google import genai
 from dotenv import load_dotenv
 import json
 
+from quality import (
+    quality_to_ydl_format as _quality_to_ydl_format,
+    quality_to_crf as _quality_to_crf,
+    FORMAT_SORT as _QUALITY_FORMAT_SORT,
+    YOUTUBE_PLAYER_CLIENTS as _YOUTUBE_PLAYER_CLIENTS,
+)
+
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module='google.protobuf')
 
@@ -457,48 +464,6 @@ def sanitize_filename(filename):
     return filename[:100].strip('_')
 
 
-def _quality_to_ydl_format(quality):
-    """Map UI quality choice to a yt-dlp format selector.
-
-    Note: YouTube only serves H.264 up to 1080p. 1440p/2160p are VP9/AV1
-    only, so for "best" / "4k" / "2k" we must NOT force avc1 or even
-    `ext=mp4`, or the download silently caps at 1080p (or falls back to
-    a much lower resolution). The download container is merged as mkv;
-    the clip cut step re-encodes to H.264/MP4 anyway, so final clips
-    are always standard MP4.
-    """
-    q = (quality or "best").lower()
-    if q in ("best", "max", "4k", "2160p"):
-        # Any container, any codec. yt-dlp picks highest resolution.
-        return 'bestvideo+bestaudio/best'
-    if q in ("2k", "1440p"):
-        return 'bestvideo[height<=1440]+bestaudio/best[height<=1440]/best'
-    if q == "1080p":
-        # Prefer H.264/mp4 when available (YouTube offers it up to 1080p
-        # and it avoids a re-encode during merge), fall back to anything.
-        return ('bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/'
-                'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best')
-    if q == "720p":
-        return ('bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/'
-                'bestvideo[height<=720]+bestaudio/best[height<=720]/best')
-    if q == "480p":
-        return ('bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/'
-                'bestvideo[height<=480]+bestaudio/best[height<=480]/best')
-    return 'bestvideo+bestaudio/best'
-
-
-def _quality_to_crf(quality):
-    """Map UI quality choice to an ffmpeg CRF value (lower = higher quality)."""
-    q = (quality or "best").lower()
-    return {
-        "best": 15, "4k": 15, "2160p": 15,
-        "2k": 16, "1440p": 16,
-        "1080p": 18,
-        "720p": 20,
-        "480p": 23,
-    }.get(q, 18)
-
-
 def download_youtube_video(url, output_dir=".", quality="best"):
     """
     Downloads a YouTube video using yt-dlp.
@@ -534,8 +499,11 @@ def download_youtube_video(url, output_dir=".", quality="best"):
     print(f"🌐 Proxy: {'enabled' if proxy_url else 'disabled'}")
 
     # Common yt-dlp options to work around YouTube bot detection.
-    # extractor_args tries multiple player clients in order; tv_embed / android
-    # avoid the OAuth/PO-token checks that block server IPs.
+    # `player_client` order matters for resolution: the `web` and
+    # `web_safari` clients are the only ones that expose 1440p/2160p
+    # VP9/AV1 streams; `tv_embed` / `android` / `mweb` cap at 1080p,
+    # so if we list them first yt-dlp picks whichever is first to
+    # work and silently stays at 1080p even when 4K is available.
     _COMMON_YDL_OPTS = {
         'quiet': False,
         'verbose': True,
@@ -547,10 +515,13 @@ def download_youtube_video(url, output_dir=".", quality="best"):
         'fragment_retries': 10,
         'nocheckcertificate': True,
         'cachedir': False,
+        # Force resolution-first sorting so the selector always picks
+        # the highest res available, regardless of codec.
+        'format_sort': list(_QUALITY_FORMAT_SORT),
         'extractor_args': {
             'youtube': {
-                'player_client': ['tv_embed', 'android', 'mweb', 'web'],
-                'player_skip': ['webpage', 'configs'],
+                'player_client': list(_YOUTUBE_PLAYER_CLIENTS),
+                'player_skip': ['configs'],
             }
         },
         'http_headers': {
@@ -615,16 +586,33 @@ Technical Details: {str(e)}
     # YouTube) can be joined without a forced re-encode. The clip cut step
     # later re-encodes to H.264/MP4, so the final clips are always
     # standard MP4 regardless of the intermediate container.
+    selected_formats = []
+
+    def _format_hook(info):
+        # Called by yt-dlp for each format it picks; capture them for logging.
+        if info.get('status') in ('downloading', 'finished') and 'format' in info:
+            fmt = info.get('format')
+            if fmt and fmt not in selected_formats:
+                selected_formats.append(fmt)
+
     ydl_opts = {
         **_COMMON_YDL_OPTS,
         'format': _quality_to_ydl_format(quality),
         'outtmpl': output_template,
         'merge_output_format': 'mkv',
         'overwrites': True,
+        'progress_hooks': [_format_hook],
     }
-    
+
+    print(f"🎯 yt-dlp format selector: {ydl_opts['format']}")
+    print(f"🎯 yt-dlp format_sort: {_COMMON_YDL_OPTS.get('format_sort')}")
+    print(f"🎯 yt-dlp player_client order: {_COMMON_YDL_OPTS['extractor_args']['youtube']['player_client']}")
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
+
+    for fmt in selected_formats:
+        print(f"🎞️  yt-dlp picked: {fmt}")
     
     downloaded_file = os.path.join(output_dir, f'{sanitized_title}.mp4')
 
@@ -646,9 +634,21 @@ Technical Details: {str(e)}
         )
 
     file_size_mb = os.path.getsize(downloaded_file) / (1024 * 1024)
+
+    # Measure actual resolution with opencv so the job logs prove what
+    # really got downloaded (1080p vs 1440p vs 2160p, etc.).
+    try:
+        _cap = cv2.VideoCapture(downloaded_file)
+        _w = int(_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        _h = int(_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        _cap.release()
+        res_label = f"{_w}x{_h}"
+    except Exception as probe_err:
+        res_label = f"unknown ({probe_err})"
+
     step_end_time = time.time()
     print(f"✅ Video downloaded in {step_end_time - step_start_time:.2f}s: "
-          f"{downloaded_file} ({file_size_mb:.1f} MB)")
+          f"{downloaded_file} ({file_size_mb:.1f} MB, {res_label})")
 
     return downloaded_file, sanitized_title
 
