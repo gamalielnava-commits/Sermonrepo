@@ -385,7 +385,7 @@ async def process_endpoint(
         target_duration = 30
     if clip_count not in (0, 3, 5, 10, 15):
         clip_count = 0  # 0 = auto
-    if quality not in ("best", "1080p", "720p", "480p"):
+    if quality not in ("best", "4k", "2k", "1080p", "720p", "480p"):
         quality = "best"
 
     job_id = str(uuid.uuid4())

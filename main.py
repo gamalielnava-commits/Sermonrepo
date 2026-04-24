@@ -458,28 +458,44 @@ def sanitize_filename(filename):
 
 
 def _quality_to_ydl_format(quality):
-    """Map UI quality choice to a yt-dlp format selector."""
+    """Map UI quality choice to a yt-dlp format selector.
+
+    Note: YouTube only serves H.264 up to 1080p. 1440p/2160p are VP9/AV1
+    only, so for "best" / "4k" / "2k" we must NOT force avc1 or the
+    download silently caps at 1080p. The clip cut step re-encodes to
+    H.264 anyway, so the final clips are always MP4/H.264.
+    """
     q = (quality or "best").lower()
-    if q in ("best", "max"):
-        return ('bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/'
-                'bestvideo[vcodec^=avc1]+bestaudio/best[ext=mp4]/best')
+    if q in ("best", "max", "4k", "2160p"):
+        # No height cap, no codec restriction. Prefer mp4 container when
+        # possible but fall back to whatever has the highest resolution.
+        return ('bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
+                'bestvideo+bestaudio/best')
+    if q in ("2k", "1440p"):
+        return ('bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/'
+                'bestvideo[height<=1440]+bestaudio/best[height<=1440]/best')
     if q == "1080p":
-        return ('bestvideo[height<=1080][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/'
-                'bestvideo[height<=1080][ext=mp4]+bestaudio/best[height<=1080][ext=mp4]/best')
+        return ('bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/'
+                'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best')
     if q == "720p":
-        return ('bestvideo[height<=720][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/'
-                'bestvideo[height<=720][ext=mp4]+bestaudio/best[height<=720][ext=mp4]/best')
+        return ('bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/'
+                'bestvideo[height<=720]+bestaudio/best[height<=720]/best')
     if q == "480p":
-        return ('bestvideo[height<=480][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/'
-                'bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480][ext=mp4]/best')
-    return ('bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/'
-            'bestvideo+bestaudio/best')
+        return ('bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/'
+                'bestvideo[height<=480]+bestaudio/best[height<=480]/best')
+    return 'bestvideo+bestaudio/best'
 
 
 def _quality_to_crf(quality):
     """Map UI quality choice to an ffmpeg CRF value (lower = higher quality)."""
     q = (quality or "best").lower()
-    return {"best": 16, "1080p": 18, "720p": 20, "480p": 23}.get(q, 18)
+    return {
+        "best": 15, "4k": 15, "2160p": 15,
+        "2k": 16, "1440p": 16,
+        "1080p": 18,
+        "720p": 20,
+        "480p": 23,
+    }.get(q, 18)
 
 
 def download_youtube_video(url, output_dir=".", quality="best"):
@@ -608,14 +624,19 @@ Technical Details: {str(e)}
     downloaded_file = os.path.join(output_dir, f'{sanitized_title}.mp4')
     
     if not os.path.exists(downloaded_file):
+        # yt-dlp may have written the file with a different extension
+        # (e.g. .webm for VP9/AV1 streams that don't fit in MP4).
+        # Accept any video container; the cut step re-encodes to H.264/MP4.
+        video_exts = ('.mp4', '.mkv', '.webm', '.mov', '.m4v')
         for f in os.listdir(output_dir):
-            if f.startswith(sanitized_title) and f.endswith('.mp4'):
+            if f.startswith(sanitized_title) and f.lower().endswith(video_exts):
                 downloaded_file = os.path.join(output_dir, f)
+                print(f"📦 Downloaded with container: {os.path.splitext(f)[1]}")
                 break
-    
+
     step_end_time = time.time()
     print(f"✅ Video downloaded in {step_end_time - step_start_time:.2f}s: {downloaded_file}")
-    
+
     return downloaded_file, sanitized_title
 
 def process_video_to_vertical(input_video, final_output_video):
@@ -976,7 +997,7 @@ if __name__ == '__main__':
     parser.add_argument('--clip-count', type=int, default=0,
                         help="Exact number of clips to generate (0 = auto / Gemini decides 3-15).")
     parser.add_argument('--quality', type=str, default='best',
-                        choices=['best', '1080p', '720p', '480p'],
+                        choices=['best', '4k', '2k', '1080p', '720p', '480p'],
                         help="Download and encoding quality preset.")
     
     args = parser.parse_args()
