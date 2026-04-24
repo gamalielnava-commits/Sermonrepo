@@ -715,23 +715,25 @@ function App() {
 
           {/* View: Dashboard (Idle) */}
           {activeTab === 'dashboard' && status === 'idle' && (
-            <div className="h-full flex flex-col items-center justify-center p-6 animate-[fadeIn_0.3s_ease-out]">
-              <div className="max-w-xl w-full text-center space-y-8">
-                <div className="space-y-4">
-                  <h1 className="text-4xl md:text-5xl font-black bg-gradient-to-b from-white to-white/60 bg-clip-text text-transparent">
-                    Create Viral Shorts
-                  </h1>
-                  <p className="text-zinc-400 text-lg">
-                    Drop your long-form video URL or file below to instantly generate viral clips with AI.
-                  </p>
-                </div>
+            <div className="h-full overflow-y-auto custom-scrollbar p-6 animate-[fadeIn_0.3s_ease-out]">
+              <div className="min-h-full flex flex-col items-center justify-center">
+                <div className="max-w-xl w-full text-center space-y-8">
+                  <div className="space-y-4">
+                    <h1 className="text-4xl md:text-5xl font-black bg-gradient-to-b from-white to-white/60 bg-clip-text text-transparent">
+                      Create Viral Shorts
+                    </h1>
+                    <p className="text-zinc-400 text-lg">
+                      Drop your long-form video URL or file below to instantly generate viral clips with AI.
+                    </p>
+                  </div>
 
-                <MediaInput onProcess={handleProcess} isProcessing={status === 'processing'} />
+                  <MediaInput onProcess={handleProcess} isProcessing={status === 'processing'} />
 
-                <div className="flex items-center justify-center gap-8 text-zinc-500 text-sm">
-                  <span className="flex items-center gap-2"><Youtube size={16} /> YouTube</span>
-                  <span className="flex items-center gap-2"><Instagram size={16} /> Instagram</span>
-                  <span className="flex items-center gap-2"><TikTokIcon size={16} /> TikTok</span>
+                  <div className="flex items-center justify-center gap-8 text-zinc-500 text-sm">
+                    <span className="flex items-center gap-2"><Youtube size={16} /> YouTube</span>
+                    <span className="flex items-center gap-2"><Instagram size={16} /> Instagram</span>
+                    <span className="flex items-center gap-2"><TikTokIcon size={16} /> TikTok</span>
+                  </div>
                 </div>
               </div>
             </div>
