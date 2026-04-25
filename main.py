@@ -891,8 +891,25 @@ def get_viral_clips(transcript_result, video_duration):
             text = text[:-3]
         text = text.strip()
         
-        result_json = json.loads(text)
-        if cost_analysis:
+        # Robust JSON parsing - handle "Extra data" from Gemini
+        result_json = None
+        try:
+            result_json = json.loads(text)
+        except json.JSONDecodeError as je:
+            if 'Extra data' in str(je):
+                # Gemini returned extra text after JSON - extract first valid object
+                try:
+                    decoder = json.JSONDecoder()
+                    result_json, _ = decoder.raw_decode(text.strip())
+                    print(f"⚠️ Gemini returned extra data, extracted first JSON object successfully")
+                except Exception as e2:
+                    print(f"❌ Gemini JSON extract failed: {e2}. Raw: {text[:200]}")
+                    return None
+            else:
+                print(f"❌ Gemini JSON parse failed: {je}. Raw (first 500 chars): {text[:500]}")
+                return None
+
+        if result_json and cost_analysis:
             result_json['cost_analysis'] = cost_analysis
             
         return result_json
