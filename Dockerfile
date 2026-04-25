@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxrender1 \
     nodejs \
+    && ln -sf /usr/bin/nodejs /usr/bin/node \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=py-builder /opt/venv /opt/venv
